@@ -1,14 +1,20 @@
-A simple netmap app to serve icmp echo and arp reply.
+# Netmap Initd
+
+Now serve:
+1. ARP request,
+2. ICMP Echo Request.
 
 # Build
 
-Make sure [netmap](https://github.com/luigirizzo/netmap) installed, then:
+Make sure [netmap](https://github.com/luigirizzo/netmap) installed.
+
+Build:
 
 ```
 make
 ```
 
-or build debug:
+Build with debug info:
 
 ```
 make debug
