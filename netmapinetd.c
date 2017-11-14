@@ -35,6 +35,14 @@ pkt_dump(const u_char *p, uint32_t l)
 }
 #endif
 
+struct context
+{
+    u_int32_t if_addr;
+    const u_int8_t * if_mac;
+    struct pollfd *fdr;
+    struct pollfd *fdw;
+};
+
 /* Compute the checksum of the given ip header. */
 static uint32_t
 checksum(const void *data, uint16_t len, uint32_t sum)
@@ -79,7 +87,7 @@ ipv4_aton(const char *name)
 }
 
 static inline int
-icmp_echo_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint8_t *imac)
+icmp_echo_reply(struct context *ctx, struct nm_desc *d, u_char *buf, uint32_t l)
 {
     struct ether_header *ethh;
     struct iphdr *iph;
@@ -87,7 +95,7 @@ icmp_echo_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, cons
     u_int32_t addr;
     ethh = (struct ether_header *)buf;
     iph = (struct iphdr *)(ethh + 1);
-    if (iph->protocol != IPPROTO_ICMP || iph -> daddr != iaddr) {
+    if (iph->protocol != IPPROTO_ICMP || iph -> daddr != ctx->if_addr) {
         return 0;
     }
     icmph = (struct icmphdr *)(iph + 1);
@@ -101,10 +109,11 @@ icmp_echo_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, cons
     iph->check = 0;
     iph->check = wrapsum(checksum(iph, 20, 0));
     bcopy(ethh->ether_shost, ethh->ether_dhost, 6);
-    bcopy(imac,ethh->ether_shost, 6);
+    bcopy(ctx->if_mac,ethh->ether_shost, 6);
     icmph->type = ntohs(ICMP_ECHOREPLY);
     memset(&(icmph->checksum), 0, 2);
     icmph->checksum = wrapsum(checksum(icmph, 8, 0));
+    poll(ctx->fdw, 1, -1);
     nm_inject(d, buf, l);
 #ifdef DEBUG_NETMAP_USER
     D("icmp echo replied:");
@@ -114,7 +123,7 @@ icmp_echo_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, cons
 }
 
 static inline int
-arp_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint8_t *imac)
+arp_reply(struct context *ctx, struct nm_desc *d, u_char *buf, uint32_t l)
 {
     struct ether_header *ethh;
     struct ether_arp *etha;
@@ -123,12 +132,12 @@ arp_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint
     ethh = (struct ether_header *)buf;
     etha = (struct ether_arp*)(ethh + 1);
     memcpy(&arp_tpa, etha->arp_tpa, 4);
-    if (arp_tpa != iaddr){
+    if (arp_tpa != ctx->if_addr){
         return 0;
     }
     if (etha->ea_hdr.ar_op == htons(ARPOP_REQUEST)) {
         bcopy(ethh->ether_shost, ethh->ether_dhost, 6);
-        bcopy(imac, ethh->ether_shost, 6);
+        bcopy(ctx->if_mac, ethh->ether_shost, 6);
         bcopy(ethh->ether_dhost, etha->arp_tha, 6);
         bcopy(ethh->ether_shost, etha->arp_sha, 6);
         /* switch source address and target address */
@@ -137,6 +146,7 @@ arp_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint
         bcopy(addr, etha->arp_tpa, 4);
         /* set reply */
         etha->ea_hdr.ar_op = htons(ARPOP_REPLY);
+        poll(ctx->fdw, 1, -1);
         nm_inject(d, buf, l);
 #ifdef DEBUG_NETMAP_USER
         D("arp request replied:");
@@ -147,7 +157,7 @@ arp_reply(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint
 }
 
 static inline int
-handle_packet(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const uint8_t *imac)
+handle_packet(struct context *ctx, struct nm_desc *d, u_char *buf, uint32_t l)
 {
     struct ether_header *ethh;
     u_int16_t etht;
@@ -155,17 +165,28 @@ handle_packet(struct nm_desc *d, u_char *buf, uint32_t l, uint32_t iaddr, const 
     etht = ntohs(ethh->ether_type);
     switch (etht) {
     case ETHERTYPE_IP:
-        icmp_echo_reply(d, buf, l, iaddr, imac);
+        icmp_echo_reply(ctx, d, buf, l);
         return 0;
     case ETHERTYPE_ARP:
-        arp_reply(d, buf, l, iaddr, imac);
+        arp_reply(ctx, d, buf, l);
         return 0;
     }
     return 0;
 }
 
+static inline void
+initd_cb(u_char *arg, const struct nm_pkthdr *h, const u_char *d)
+{
+    struct context *ctx = (struct context*) arg;
+#ifdef DEBUG_NETMAP_USER
+    D("pkt received:");
+    pkt_dump(d, h->len);
+#endif
+    handle_packet(ctx, h->d, h->buf, h->len);
+}
+
 static int
-main_loop(const char *iname, uint32_t iaddr, const uint8_t *imac)
+main_loop(const char *iname, u_int32_t iaddr, u_int8_t *imac)
 {
     struct nm_desc *d;
     d = nm_open(iname, NULL, 0, NULL);
@@ -178,22 +199,20 @@ main_loop(const char *iname, uint32_t iaddr, const uint8_t *imac)
         }
         return -1;
     }
-    struct pollfd fds;
+    struct context ctx;
+    ctx.if_mac = imac;
+    ctx.if_addr = iaddr;
+    struct pollfd fds, fdw;
+    ctx.fdr = &fds;
+    ctx.fdw = &fdw;
+    fdw.fd = d->fd;
+    fdw.events = POLLOUT;
     fds.fd = d->fd;
     fds.events = POLLIN;
+
     for(;;) {
-        u_char *buf;
-        struct nm_pkthdr h;
         poll(&fds, 1, -1);
-        memset(&h, 0, sizeof(h));
-        while ( (buf = nm_nextpkt(d, &h)) ){
-#ifdef DEBUG_NETMAP_USER
-            D("pkt received:");
-            pkt_dump(buf, h.len);
-#endif
-            handle_packet(d, buf, h.len, iaddr, imac);
-            memset(&h, 0, sizeof(h));
-        }
+        nm_dispatch(d, -1, initd_cb, (u_char *)&ctx);
     }
     nm_close(d);
     return 0;
