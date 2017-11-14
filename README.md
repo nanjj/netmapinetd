@@ -1,10 +1,12 @@
-# Netmap Initd
+## What's it for ##
 
-Now serve:
+It's a netmap application, which can be used to learn netmap.
+
+Now it serves:
 1. ARP request,
 2. ICMP Echo Request.
 
-# Build
+## Build ##
 
 Make sure [netmap](https://github.com/luigirizzo/netmap) installed.
 
@@ -20,7 +22,7 @@ Build with debug info:
 make debug
 ```
 
-# Use
+## Use ##
 
 Run on netmap enabled box:
 
@@ -47,9 +49,3 @@ warpping -i eth0 -d 172.15.11.9
 ```
 
 Get `warpping` from [warpcore](https://github.com/NTAP/warpcore).
-
-
-
-
-
-
