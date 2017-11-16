@@ -1,11 +1,3 @@
-## What's it for ##
-
-It's a netmap application, which can be used to learn netmap.
-
-Now it serves:
-1. ARP request,
-2. ICMP Echo Request.
-
 ## Build ##
 
 Make sure [netmap](https://github.com/luigirizzo/netmap) installed.
@@ -22,7 +14,11 @@ Build with debug info:
 make debug
 ```
 
-## Use ##
+## Nmpingd ##
+
+`nmpingd` serves:
+1. ARP request,
+2. ICMP Echo Request.
 
 Run on netmap enabled box:
 
