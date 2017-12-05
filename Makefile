@@ -1,13 +1,13 @@
 CC=gcc
 CFLAGS=-Wall -g -Werror
-PROGS=nmpingd nmcat
+PROGS=nmcat
 
 all: $(PROGS)
 
 debug: CFLAGS += -DDEBUG_NETMAP_USER
 debug: $(PROGS)
 
-nmpingd: nmpingd.o
+# nmpingd: nmpingd.o
 nmcat: nmcat.o
 
 clean:
