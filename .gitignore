@@ -1,3 +1,2 @@
 G[a-zA-Z]*
 *.o
-nm[a-zA-Z]*
